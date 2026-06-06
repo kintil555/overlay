@@ -92,7 +92,7 @@ public class OverlayScreen extends Screen {
                 Text.literal(""));
         pathInput.setMaxLength(512);
         pathInput.setPlaceholder(Text.literal("Contoh: C:/gambar/overlay.png atau /home/user/frame.png"));
-        addSelectableChild(pathInput);
+        addDrawableChild(pathInput);
 
         // ── Tombol Tambah ──────────────────────────────────────────────────────
         addButton = ButtonWidget.builder(Text.literal("+ Tambah"), btn -> doAddOverlay())
