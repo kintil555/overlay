@@ -22,7 +22,6 @@ public class OverlayModClient implements ClientModInitializer {
     public void onInitializeClient() {
         LOGGER.info("[OverlayMod] Initializing...");
 
-        // Load config
         OverlayConfig config = OverlayConfig.load();
         OverlayRenderer.setConfig(config);
 
@@ -34,7 +33,7 @@ public class OverlayModClient implements ClientModInitializer {
                 "key.category.overlaymod"
         ));
 
-        // Keybinding: Z untuk compare/peek (tahan = overlay hilang, lepas = muncul lagi)
+        // Keybinding: Z untuk compare/peek (tahan = overlay hilang)
         compareKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
                 "key.overlaymod.compare",
                 InputUtil.Type.KEYSYM,
@@ -54,17 +53,13 @@ public class OverlayModClient implements ClientModInitializer {
                 }
             }
 
-            // Compare / peek mode — cek apakah tombol sedang DITAHAN
-            // Pakai InputUtil.isKeyPressed agar responsif setiap frame, bukan hanya saat pressed event
-            long windowHandle = client.getWindow().getHandle();
-            int compareGlfw   = InputUtil.fromTranslationKey(compareKey.getTranslationKey()) == null
-                                 ? GLFW.GLFW_KEY_Z
-                                 : compareKey.getDefaultKey().getCode();
+            // Compare mode: cek apakah tombol compare sedang DITAHAN
+            // getBoundKeyOf() mengambil key yang aktif (termasuk kalau user remap)
+            long window = client.getWindow().getHandle();
+            InputUtil.Key boundKey = KeyBindingHelper.getBoundKeyOf(compareKey);
+            boolean holding = InputUtil.isKeyPressed(window, boundKey.getCode());
 
-            boolean holding = InputUtil.isKeyPressed(windowHandle, compareGlfw);
-
-            // Update flag di renderer
-            // Jangan aktifkan compare kalau GUI overlay sedang terbuka
+            // Jangan aktifkan saat GUI overlay terbuka
             if (client.currentScreen instanceof OverlayScreen) {
                 OverlayRenderer.setHideForCompare(false);
             } else {
@@ -72,7 +67,6 @@ public class OverlayModClient implements ClientModInitializer {
             }
         });
 
-        // HUD render tiap frame
         HudRenderCallback.EVENT.register((drawContext, renderTickCounter) ->
                 OverlayRenderer.render(drawContext, renderTickCounter.getTickDelta(false)));
 
