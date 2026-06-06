@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "id": "overlaymod",
+  "version": "${version}",
+  "name": "Overlay Mod",
+  "description": "Tambahkan gambar overlay ke layar game dengan rule of thirds, kontrol opasitas, untuk keperluan thumbnail dan compositing scene.",
+  "authors": ["kintil555"],
+  "contact": {
+    "sources": "https://github.com/kintil555/overlay"
+  },
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "com.kintil.overlaymod.client.OverlayModClient"
+    ]
+  },
+  "mixins": [],
+  "depends": {
+    "fabricloader": ">=0.15.0",
+    "fabric-api": "*",
+    "minecraft": "~1.21.1",
+    "java": ">=21"
+  }
+}
