@@ -5,117 +5,92 @@ import com.kintil.overlaymod.config.OverlayEntry;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.util.Identifier;
-import org.joml.Matrix4f;
 
 /**
- * Merender semua overlay aktif + rule of thirds ke layar game.
- * Dipanggil via HudRenderCallback setiap frame.
+ * Render semua overlay aktif + rule of thirds ke layar.
+ * Dipanggil setiap frame via HudRenderCallback.
  */
 public class OverlayRenderer {
 
     private static OverlayConfig config;
 
-    public static void setConfig(OverlayConfig cfg) {
-        config = cfg;
-    }
+    public static void setConfig(OverlayConfig cfg) { config = cfg; }
+    public static OverlayConfig getConfig()          { return config; }
 
-    public static OverlayConfig getConfig() {
-        return config;
-    }
-
-    /**
-     * Render semua overlay yang aktif.
-     */
     public static void render(DrawContext context, float tickDelta) {
         if (config == null) return;
 
         MinecraftClient mc = MinecraftClient.getInstance();
-        int screenW = mc.getWindow().getScaledWidth();
-        int screenH = mc.getWindow().getScaledHeight();
+        // Jangan render di screen selain in-game (mis. inventory, pause) — opsional,
+        // bisa dikomentari jika mau tetap tampil di semua screen
+        // if (mc.currentScreen != null && !(mc.currentScreen instanceof OverlayScreen)) return;
 
-        // Render setiap overlay
+        int sw = mc.getWindow().getScaledWidth();
+        int sh = mc.getWindow().getScaledHeight();
+
         for (OverlayEntry entry : config.overlays) {
-            if (!entry.enabled || entry.path == null || entry.path.isBlank()) continue;
+            if (!entry.enabled) continue;
+            if (entry.path == null || entry.path.isBlank()) continue;
 
+            // Lazy-load: load texture kalau belum ada (kita sudah di render thread sini)
             Identifier texId = OverlayTextureManager.getIdentifier(entry.path);
             if (texId == null) {
-                // Coba load jika belum
                 texId = OverlayTextureManager.loadFromPath(entry.path);
-                if (texId == null) continue;
+                if (texId == null) continue; // file tidak ada / gagal
             }
 
-            renderTextureWithOpacity(context, texId, 0, 0, screenW, screenH, entry.opacity);
+            renderWithOpacity(context, texId, 0, 0, sw, sh, entry.opacity);
         }
 
-        // Render rule of thirds
         if (config.showRuleOfThirds) {
-            renderRuleOfThirds(context, screenW, screenH);
+            renderRuleOfThirds(context, sw, sh);
         }
     }
 
-    /**
-     * Render texture dengan opasitas tertentu menggunakan RenderSystem.
-     * Menggunakan drawTexture yang mendukung alpha color.
-     */
-    private static void renderTextureWithOpacity(DrawContext context, Identifier texture,
-                                                  int x, int y, int width, int height, float opacity) {
+    private static void renderWithOpacity(DrawContext context, Identifier tex,
+                                          int x, int y, int w, int h, float opacity) {
         if (opacity <= 0f) return;
+        float alpha = Math.min(Math.max(opacity, 0f), 1f);
 
-        int alpha = (int) (Math.min(Math.max(opacity, 0f), 1f) * 255);
-        // ARGB: alpha di bits 24-31
-        int color = (alpha << 24) | 0x00FFFFFF;
-
-        // drawTexture(Identifier, x, y, u, v, width, height, texWidth, texHeight)
-        // Gunakan color-tinted version via matrices + RenderSystem color
         com.mojang.blaze3d.systems.RenderSystem.enableBlend();
         com.mojang.blaze3d.systems.RenderSystem.defaultBlendFunc();
-        com.mojang.blaze3d.systems.RenderSystem.setShaderColor(1f, 1f, 1f, opacity);
+        com.mojang.blaze3d.systems.RenderSystem.setShaderColor(1f, 1f, 1f, alpha);
 
-        // drawTexture: texture, x, y, u, v, width, height, texWidth, texHeight
-        context.drawTexture(texture, x, y, 0, 0, width, height, width, height);
+        // drawTexture(id, x, y, u, v, regionW, regionH, texW, texH)
+        context.drawTexture(tex, x, y, 0, 0, w, h, w, h);
 
         com.mojang.blaze3d.systems.RenderSystem.setShaderColor(1f, 1f, 1f, 1f);
         com.mojang.blaze3d.systems.RenderSystem.disableBlend();
     }
 
-    /**
-     * Render garis Rule of Thirds (2 horizontal + 2 vertical) di atas layar.
-     */
-    public static void renderRuleOfThirds(DrawContext context, int screenW, int screenH) {
-        // Warna: putih semi-transparan
-        int lineColor = 0x88FFFFFF; // ARGB
-        int lineThickness = 1;
+    public static void renderRuleOfThirds(DrawContext context, int sw, int sh) {
+        int lc = 0x88FFFFFF; // putih semi-transparan
+        int dc = 0xCCFFCC00; // kuning untuk titik intersection
 
-        int x1 = screenW / 3;
-        int x2 = (screenW * 2) / 3;
-        int y1 = screenH / 3;
-        int y2 = (screenH * 2) / 3;
+        int x1 = sw / 3, x2 = sw * 2 / 3;
+        int y1 = sh / 3, y2 = sh * 2 / 3;
 
         com.mojang.blaze3d.systems.RenderSystem.enableBlend();
         com.mojang.blaze3d.systems.RenderSystem.defaultBlendFunc();
 
-        // Garis vertikal kiri
-        context.fill(x1, 0, x1 + lineThickness, screenH, lineColor);
-        // Garis vertikal kanan
-        context.fill(x2, 0, x2 + lineThickness, screenH, lineColor);
-        // Garis horizontal atas
-        context.fill(0, y1, screenW, y1 + lineThickness, lineColor);
-        // Garis horizontal bawah
-        context.fill(0, y2, screenW, y2 + lineThickness, lineColor);
+        // 2 garis vertikal
+        context.fill(x1, 0, x1 + 1, sh, lc);
+        context.fill(x2, 0, x2 + 1, sh, lc);
+        // 2 garis horizontal
+        context.fill(0, y1, sw, y1 + 1, lc);
+        context.fill(0, y2, sw, y2 + 1, lc);
 
-        // Titik-titik intersection (rule of thirds points)
-        int dotSize = 6;
-        int dotColor = 0xCCFFCC00; // kuning semi-transparan
-        renderDot(context, x1, y1, dotSize, dotColor);
-        renderDot(context, x2, y1, dotSize, dotColor);
-        renderDot(context, x1, y2, dotSize, dotColor);
-        renderDot(context, x2, y2, dotSize, dotColor);
+        // 4 titik intersection
+        dot(context, x1, y1, 6, dc);
+        dot(context, x2, y1, 6, dc);
+        dot(context, x1, y2, 6, dc);
+        dot(context, x2, y2, 6, dc);
 
         com.mojang.blaze3d.systems.RenderSystem.disableBlend();
     }
 
-    private static void renderDot(DrawContext context, int cx, int cy, int size, int color) {
-        int half = size / 2;
-        context.fill(cx - half, cy - half, cx + half, cy + half, color);
+    private static void dot(DrawContext ctx, int cx, int cy, int size, int color) {
+        int h = size / 2;
+        ctx.fill(cx - h, cy - h, cx + h, cy + h, color);
     }
 }

@@ -15,28 +15,34 @@ import java.util.Map;
 
 /**
  * Mengelola loading gambar eksternal (dari path file) ke TextureManager Minecraft.
- * Menggunakan NativeImageBackedTexture agar bisa render via DrawContext.
+ * Semua operasi registerTexture HARUS di render thread — gunakan isOnRenderThread() check.
  */
 public class OverlayTextureManager {
     private static final Logger LOGGER = LoggerFactory.getLogger("overlaymod");
 
-    // path -> Identifier texture yang sudah terdaftar
     private static final Map<String, Identifier> loadedTextures = new HashMap<>();
-    // path -> ukuran gambar asli [width, height]
     private static final Map<String, int[]> textureSizes = new HashMap<>();
-    // path -> texture object agar bisa di-close
     private static final Map<String, NativeImageBackedTexture> textureObjects = new HashMap<>();
 
     private static int textureCounter = 0;
 
     /**
-     * Load gambar dari path file dan daftarkan ke TextureManager.
+     * Cek apakah file ada dan bisa dibaca.
+     */
+    public static boolean fileExists(String path) {
+        if (path == null || path.isBlank()) return false;
+        File f = new File(path);
+        return f.exists() && f.isFile() && f.canRead();
+    }
+
+    /**
+     * Load gambar dari path file. HARUS dipanggil dari render thread.
+     * Kalau belum di render thread, gunakan scheduleLoad().
      * @return Identifier texture, atau null jika gagal.
      */
     public static Identifier loadFromPath(String path) {
         if (path == null || path.isBlank()) return null;
 
-        // Jika sudah pernah di-load, kembalikan identifier yang ada
         if (loadedTextures.containsKey(path)) {
             return loadedTextures.get(path);
         }
@@ -47,56 +53,65 @@ public class OverlayTextureManager {
             return null;
         }
 
-        try (InputStream is = new FileInputStream(file)) {
+        try {
+            // Baca NativeImage — jangan pakai try-with-resources karena
+            // NativeImageBackedTexture mengambil ownership dari image
+            InputStream is = new FileInputStream(file);
             NativeImage image = NativeImage.read(is);
+            is.close();
+
+            int w = image.getWidth();
+            int h = image.getHeight();
+
+            // NativeImageBackedTexture mengambil ownership NativeImage
             NativeImageBackedTexture texture = new NativeImageBackedTexture(image);
 
-            // Buat identifier unik untuk texture ini
-            Identifier id = Identifier.of("overlaymod", "dynamic_overlay_" + textureCounter++);
+            Identifier id = Identifier.of("overlaymod", "overlay_" + textureCounter++);
 
-            MinecraftClient.getInstance().execute(() -> {
-                MinecraftClient.getInstance().getTextureManager().registerTexture(id, texture);
-            });
+            // Register langsung — harus di render thread
+            MinecraftClient mc = MinecraftClient.getInstance();
+            if (mc.isOnThread()) {
+                mc.getTextureManager().registerTexture(id, texture);
+            } else {
+                // Jadwalkan ke render thread
+                mc.execute(() -> mc.getTextureManager().registerTexture(id, texture));
+            }
 
             loadedTextures.put(path, id);
-            textureSizes.put(path, new int[]{image.getWidth(), image.getHeight()});
+            textureSizes.put(path, new int[]{w, h});
             textureObjects.put(path, texture);
 
-            LOGGER.info("[OverlayMod] Berhasil load texture: {} -> {}", path, id);
+            LOGGER.info("[OverlayMod] Load texture OK: {} ({}x{})", path, w, h);
             return id;
 
         } catch (Exception e) {
-            LOGGER.error("[OverlayMod] Gagal load gambar dari '{}': {}", path, e.getMessage());
+            LOGGER.error("[OverlayMod] Gagal load '{}': {}", path, e.getMessage());
             return null;
         }
     }
 
     /**
-     * Hapus texture yang sudah di-load dari path tertentu.
+     * Hapus texture dari TextureManager.
      */
     public static void unloadTexture(String path) {
         Identifier id = loadedTextures.remove(path);
         textureSizes.remove(path);
-        NativeImageBackedTexture tex = textureObjects.remove(path);
+        textureObjects.remove(path);
         if (id != null) {
-            MinecraftClient.getInstance().execute(() -> {
-                MinecraftClient.getInstance().getTextureManager().destroyTexture(id);
-            });
-        }
-        if (tex != null) {
-            tex.close();
+            MinecraftClient mc = MinecraftClient.getInstance();
+            if (mc.isOnThread()) {
+                mc.getTextureManager().destroyTexture(id);
+            } else {
+                mc.execute(() -> mc.getTextureManager().destroyTexture(id));
+            }
         }
     }
 
-    /**
-     * Hapus semua texture yang di-load.
-     */
     public static void unloadAll() {
-        for (String path : loadedTextures.keySet()) {
-            Identifier id = loadedTextures.get(path);
-            MinecraftClient.getInstance().getTextureManager().destroyTexture(id);
+        MinecraftClient mc = MinecraftClient.getInstance();
+        for (Identifier id : loadedTextures.values()) {
+            mc.execute(() -> mc.getTextureManager().destroyTexture(id));
         }
-        textureObjects.values().forEach(NativeImageBackedTexture::close);
         loadedTextures.clear();
         textureSizes.clear();
         textureObjects.clear();
@@ -104,6 +119,10 @@ public class OverlayTextureManager {
 
     public static Identifier getIdentifier(String path) {
         return loadedTextures.get(path);
+    }
+
+    public static boolean isLoaded(String path) {
+        return loadedTextures.containsKey(path);
     }
 
     public static int[] getSize(String path) {
